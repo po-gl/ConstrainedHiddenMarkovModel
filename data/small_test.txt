@@ -1,0 +1,4 @@
+Ted:NNP now:RB likes:VBZ green:NN
+Mary:NNP likes:VBZ red:NN
+Mary:NNP now:RB loves:VBZ red:NN
+Fred:NNP sees:VBZ Mary:NNP sometimes:RB
