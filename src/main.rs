@@ -45,6 +45,8 @@ fn main() {
 
     println!("Sampled Sequences:");
     for _ in 0..10 {
-        println!("{}", constrained_model.sample_sequence());
+        let str = constrained_model.sample_sequence(true);
+        println!("{}", str);
+        // println!("{}", constrained_model.get_sequence_probability(&*str));
     }
 }

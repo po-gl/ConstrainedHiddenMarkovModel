@@ -56,7 +56,7 @@ impl ConstrainedHiddenMarkov {
     }
 
     /// Generate a sequence
-    pub fn sample_sequence(&self) -> String {
+    pub fn sample_sequence(&self, include_hidden: bool) -> String {
         let mut sequence = String::from("");
         let mut curr_hidden = START_TOKEN;
         for i in 0..self.sequence_length {
@@ -68,8 +68,10 @@ impl ConstrainedHiddenMarkov {
 
             if self.observed_probs[i].contains_key(curr_hidden) {
                 sequence += ConstrainedHiddenMarkov::next_token(&self.observed_probs[i][curr_hidden]);
-                sequence += ":";
-                sequence += curr_hidden;
+                if include_hidden {
+                    sequence += ":";
+                    sequence += curr_hidden;
+                }
                 if i != self.sequence_length - 1 { sequence += " " }
             }
         }
@@ -565,7 +567,7 @@ mod tests {
         let model = HiddenMarkov::new(1, data);
         let mut constrained_model = ConstrainedHiddenMarkov::new(model.clone(), 4, None, Some(observed_constraints));
         constrained_model.train();
-        assert_eq!("Ted:NNP now:RB likes:VBZ green:NN", constrained_model.sample_sequence());
+        assert_eq!("Ted:NNP now:RB likes:VBZ green:NN", constrained_model.sample_sequence(true));
     }
 
     #[test]
@@ -585,7 +587,7 @@ mod tests {
         let model = HiddenMarkov::new(1, data);
         let mut constrained_model = ConstrainedHiddenMarkov::new(model.clone(), 4, None, Some(observed_constraints));
         constrained_model.train();
-        assert_eq!(true, constrained_model.sample_sequence().ends_with("red:NN"));
+        assert_eq!(true, constrained_model.sample_sequence(true).ends_with("red:NN"));
     }
 
     #[test]
