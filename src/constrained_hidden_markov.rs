@@ -56,23 +56,39 @@ impl ConstrainedHiddenMarkov {
     }
 
     /// Generate a sequence
-    pub fn sample_sequence(&self, include_hidden: bool) -> String {
+    pub fn sample_sequence(&self, include_hidden: bool) -> String { // TODO: update for higher markov orders
         let mut sequence = String::from("");
-        let mut curr_hidden = START_TOKEN;
-        for i in 0..self.sequence_length {
-            if self.hidden_probs[i].contains_key(curr_hidden) {
-                curr_hidden = ConstrainedHiddenMarkov::next_token(&self.hidden_probs[i][curr_hidden])
+        let markov_order = self.hidden_markov_model.markov_order as usize;
+        let mut start_string = "".to_owned();
+        for _ in 0..markov_order {
+            start_string.push_str(START_TOKEN);
+            start_string.push(' ');
+        }
+        start_string.pop();
+        let mut hidden = start_string.as_str();
+        let mut sequence_count = 0;
+        for i in 0..self.get_markov_order_token_length() {
+            if self.hidden_probs[i].contains_key(hidden) {
+                hidden = ConstrainedHiddenMarkov::next_token(&self.hidden_probs[i][hidden])
             } else {
                 return sequence;
             }
 
-            if self.observed_probs[i].contains_key(curr_hidden) {
-                sequence += ConstrainedHiddenMarkov::next_token(&self.observed_probs[i][curr_hidden]);
+            if self.observed_probs[i].contains_key(hidden) {
+                let observed = ConstrainedHiddenMarkov::next_token(&self.observed_probs[i][hidden]);
                 if include_hidden {
-                    sequence += ":";
-                    sequence += curr_hidden;
+                    for (observed, hidden) in observed.split_whitespace().zip(hidden.split_whitespace()) {
+                        if sequence_count == self.sequence_length { break };
+                        sequence += format!("{}:{} ", observed, hidden).as_str();
+                        sequence_count += 1;
+                    }
+                    sequence.pop();
+                } else {
+                    if sequence_count == self.sequence_length { break };
+                    sequence += observed;
+                    sequence_count += 1;
                 }
-                if i != self.sequence_length - 1 { sequence += " " }
+                if i != self.sequence_length/markov_order - 1 { sequence += " " }
             }
         }
         return sequence;
@@ -98,12 +114,24 @@ impl ConstrainedHiddenMarkov {
     fn check_sequence_and_constraint_length(&self) {
         assert_eq!(self.sequence_length, self.hidden_constraints.len());
         assert_eq!(self.sequence_length, self.observed_constraints.len());
+        assert!(self.sequence_length >= self.hidden_markov_model.markov_order as usize);
+    }
+
+    fn get_markov_order_token_length(&self) -> usize {
+        let markov_order = self.hidden_markov_model.markov_order as usize;
+        return if self.sequence_length % markov_order == 0 {
+            self.sequence_length / markov_order
+        } else {
+            self.sequence_length / markov_order + 1
+        }
     }
 
     /// Performs deep copy of non-constrained hidden markov model
     /// probabilities for each sequence position
     fn duplicate_matrices(&mut self) {
-        for i in 0..self.sequence_length {
+        let markov_order = self.hidden_markov_model.markov_order as usize;
+        let end_matrix = if self.sequence_length % markov_order > 0 { 1 } else { 0 };
+        for i in 0..(self.sequence_length / markov_order + end_matrix) {
             self.hidden_probs.insert(i,self.hidden_markov_model.hidden_probs.clone());
             self.observed_probs.insert(i,self.hidden_markov_model.observed_probs.clone());
         }
@@ -117,13 +145,24 @@ impl ConstrainedHiddenMarkov {
     }
 
     fn remove_constrain_violating_hidden_states(&mut self) {
-        for i in 0..self.hidden_constraints.len() {
+        let markov_order = self.hidden_markov_model.markov_order as usize;
+        for i in 0..self.get_markov_order_token_length() {
             for (_, outer_map) in self.hidden_probs[i].iter_mut() {
                 for (inner_map_key, inner_map_val) in outer_map.iter_mut() {
-                    // Check for constraint satisfaction
-                    if !self.hidden_constraints[i].is_satisfied_by_state(String::from(inner_map_key)) {
-                        // TODO: Compare running times of removing probs entirely rather than setting to 0
-                        *inner_map_val = 0.0
+                    // Check for constraint satisfaction for each token
+                    // (split for markov orders higher than 1)
+                    let mut state_markov_split = inner_map_key.split_whitespace();
+                    for j in 0..(markov_order) {
+                        match state_markov_split.next() {
+                            None => {}
+                            Some(state) => {
+                                // continue if inside last markov order token but past constraints
+                                if (i*markov_order)+j >= self.hidden_constraints.len() { continue };
+                                if !self.hidden_constraints[(i*markov_order)+j].is_satisfied_by_state(String::from(state)) {
+                                    *inner_map_val = 0.0;
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -131,12 +170,24 @@ impl ConstrainedHiddenMarkov {
     }
 
     fn remove_constrain_violating_observed_states(&mut self) {
-        for i in 0..self.observed_constraints.len() {
+        let markov_order = self.hidden_markov_model.markov_order as usize;
+        for i in 0..self.get_markov_order_token_length() {
             for (_, outer_map) in self.observed_probs[i].iter_mut() {
                 for (inner_map_key, inner_map_val) in outer_map.iter_mut() {
-                    // Check for constraint satisfaction
-                    if !self.observed_constraints[i].is_satisfied_by_state(String::from(inner_map_key)) {
-                        *inner_map_val = 0.0;
+                    // Check for constraint satisfaction for each token
+                    // (split for markov orders higher than 1)
+                    let mut state_markov_split = inner_map_key.split_whitespace();
+                    for j in 0..(markov_order) {
+                        match state_markov_split.next() {
+                            None => {}
+                            Some(state) => {
+                                // continue if inside last markov order token but past constraints
+                                if (i*markov_order)+j >= self.observed_constraints.len() { continue };
+                                if !self.observed_constraints[(i*markov_order)+j].is_satisfied_by_state(String::from(state)) {
+                                    *inner_map_val = 0.0;
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -206,10 +257,10 @@ impl ConstrainedHiddenMarkov {
     /// probability distribution as the original HMM
     fn renormalize(&mut self) {
 
-        let mut betas: Vec<HashMap<String, f64>> = vec![HashMap::new(); self.sequence_length];
-        let mut alphas: Vec<HashMap<String, f64>> = vec![HashMap::new(); self.sequence_length];
+        let mut betas: Vec<HashMap<String, f64>> = vec![HashMap::new(); self.hidden_probs.len()];
+        let mut alphas: Vec<HashMap<String, f64>> = vec![HashMap::new(); self.hidden_probs.len()];
 
-        for i in (0..self.sequence_length).rev() {
+        for i in (0..self.hidden_probs.len()).rev() {
 
             // Renormalize observed values
             for (outer_key, outer_value) in &mut self.observed_probs[i].iter_mut() {
@@ -222,7 +273,7 @@ impl ConstrainedHiddenMarkov {
                 }
             }
 
-            if i == self.sequence_length-1 {
+            if i == self.hidden_probs.len()-1 {
                 for (outer_key, outer_value) in &mut self.hidden_probs[i].iter_mut() {
                     let mut sum: f64 = 0.0;
                     for (inner_key, inner_value) in outer_value.iter() {
@@ -240,7 +291,7 @@ impl ConstrainedHiddenMarkov {
                     let mut sum: f64 = 0.0;
                     for (inner_key, inner_value) in outer_value.iter() {
                         let alpha: f64;
-                        match alphas[i+1].get(inner_key) {
+                        match alphas[i + 1].get(inner_key) {
                             Some(value) => alpha = *value,
                             None => alpha = 0.0
                         }
@@ -250,9 +301,9 @@ impl ConstrainedHiddenMarkov {
                     if sum != 0.0 {
                         for (inner_key, inner_value) in outer_value.iter_mut() {
                             let alpha: f64;
-                            match alphas[i+1].get(inner_key) {
+                            match alphas[i + 1].get(inner_key) {
                                 Some(value) => alpha = *value,
-                                None => alpha =0.0
+                                None => alpha = 0.0
                             }
                             *inner_value = (betas[i][inner_key] * alpha * *inner_value) / sum;  // z'_jk = (beta_j * alpha^(i+1)_k * z_jk) / alpha_j
                         }
@@ -286,7 +337,7 @@ mod tests {
     use crate::constraints::empty_constraint::EmptyConstraint;
     use crate::constraints::starts_with_letter_constraint::StartsWithLetterConstraint;
     use crate::constraints::matches_constraint::MatchesConstraint;
-    use crate::utils::START_TOKEN;
+    use crate::utils::{get_test_constraints, START_TOKEN};
     use crate::constraints::multi_constraint::MultiConstraint;
 
     #[test]
@@ -445,15 +496,7 @@ mod tests {
 
     #[test]
     fn renormalize_chmm() {
-        let observed_constraints: Vec<Box<dyn Constraint + Send>> = vec![
-            Box::new(MultiConstraint::new(vec![
-                Box::new(StartsWithLetterConstraint::new('t')),
-                Box::new(StartsWithLetterConstraint::new('f')),
-            ], false)),
-            Box::new(EmptyConstraint::new()),
-            Box::new(EmptyConstraint::new()),
-            Box::new(MatchesConstraint::new(String::from("red"))),
-        ];
+        let observed_constraints = get_test_constraints();
         let data = String::from(
             "Ted:NNP now:RB likes:VBZ green:NN\nMary:NNP likes:VBZ red:NN\nMary:NNP now:RB loves:VBZ red:NN\nFred:NNP sees:VBZ Mary:NNP sometimes:RB"
         );
@@ -500,16 +543,7 @@ mod tests {
 
     #[test]
     fn train_chmm() {
-        let observed_constraints: Vec<Box<dyn Constraint + Send>> = vec![
-            Box::new(MultiConstraint::new(vec![
-                Box::new(StartsWithLetterConstraint::new('t')),
-                Box::new(StartsWithLetterConstraint::new('f')),
-            ], false)),
-            // Box::new(RhymesWithConstraint::new(String::from("red"))),
-            Box::new(EmptyConstraint::new()),
-            Box::new(EmptyConstraint::new()),
-            Box::new(MatchesConstraint::new(String::from("red"))),
-        ];
+        let observed_constraints = get_test_constraints();
         let data = String::from(
             "Ted:NNP now:RB likes:VBZ green:NN\nMary:NNP likes:VBZ red:NN\nMary:NNP now:RB loves:VBZ red:NN\nFred:NNP sees:VBZ Mary:NNP sometimes:RB"
         );
@@ -572,15 +606,7 @@ mod tests {
 
     #[test]
     fn generate_random_sequence_chmm() {
-        let observed_constraints: Vec<Box<dyn Constraint + Send>> = vec![
-            Box::new(MultiConstraint::new(vec![
-                Box::new(StartsWithLetterConstraint::new('t')),
-                Box::new(StartsWithLetterConstraint::new('f')),
-            ], false)),
-            Box::new(EmptyConstraint::new()),
-            Box::new(EmptyConstraint::new()),
-            Box::new(MatchesConstraint::new(String::from("red"))),
-        ];
+        let observed_constraints = get_test_constraints();
         let data = String::from(
             "Ted:NNP now:RB likes:VBZ green:NN\nMary:NNP likes:VBZ red:NN\nMary:NNP now:RB loves:VBZ red:NN\nFred:NNP sees:VBZ Mary:NNP sometimes:RB"
         );
@@ -603,15 +629,7 @@ mod tests {
 
     #[test]
     fn sequence_probability_two_chmm() {
-        let observed_constraints: Vec<Box<dyn Constraint + Send>> = vec![
-            Box::new(MultiConstraint::new(vec![
-                Box::new(StartsWithLetterConstraint::new('t')),
-                Box::new(StartsWithLetterConstraint::new('f')),
-            ], false)),
-            Box::new(EmptyConstraint::new()),
-            Box::new(EmptyConstraint::new()),
-            Box::new(MatchesConstraint::new(String::from("red"))),
-        ];
+        let observed_constraints = get_test_constraints();
         let data = String::from(
             "Ted:NNP now:RB likes:VBZ green:NN\nMary:NNP likes:VBZ red:NN\nMary:NNP now:RB loves:VBZ red:NN\nFred:NNP sees:VBZ Mary:NNP sometimes:RB"
         );
@@ -630,5 +648,50 @@ mod tests {
         assert_eq!(1.0/12.0, constrained_model.get_sequence_probability("Fred:NNP sometimes:RB likes:VBZ red:NN"));
         assert_eq!(1.0/24.0, constrained_model.get_sequence_probability("Fred:NNP sometimes:RB loves:VBZ red:NN"));
         assert_eq!(1.0/24.0, constrained_model.get_sequence_probability("Fred:NNP sometimes:RB sees:VBZ red:NN"));
+    }
+
+    #[test]
+    fn higher_order_chmm() {
+        let data = String::from(
+            "Ted:NNP now:RB likes:VBZ green:NN\nMary:NNP likes:VBZ red:NN\nMary:NNP now:RB loves:VBZ red:NN\nFred:NNP sees:VBZ Mary:NNP sometimes:RB"
+        );
+        let model = HiddenMarkov::new(2, data);
+        let mut constrained_model = ConstrainedHiddenMarkov::new(model.clone(), 4, None, None);
+        constrained_model.train();
+
+        assert_eq!(0.5, constrained_model.hidden_probs[0][format!("{} {}", START_TOKEN, START_TOKEN).as_str()]["NNP VBZ"]);
+        assert_eq!(0.5, constrained_model.hidden_probs[0][format!("{} {}", START_TOKEN, START_TOKEN).as_str()]["NNP RB"]);
+        assert_eq!(0.0, constrained_model.hidden_probs[0]["NNP RB"]["VBZ NN"]);
+        assert_eq!(1.0, constrained_model.hidden_probs[1]["NNP RB"]["VBZ NN"]);
+        assert_eq!(1.0, constrained_model.hidden_probs[1]["NNP VBZ"]["NNP RB"]);
+        assert_eq!(0.5, constrained_model.observed_probs[1]["NNP VBZ"]["Fred sees"]);
+        assert_eq!(0.5, constrained_model.observed_probs[1]["NNP VBZ"]["Mary likes"]);
+
+        assert_ne!(0, constrained_model.sample_sequence(true).len());
+    }
+
+    #[test]
+    fn higher_order_with_constraints_chmm() {
+        let hidden_constraints: Vec<Box<dyn Constraint + Send>> = vec![
+            Box::new(EmptyConstraint::new()),
+            Box::new(MatchesConstraint::new(String::from("VBZ"))),
+            Box::new(EmptyConstraint::new()),
+            Box::new(EmptyConstraint::new()),
+        ];
+        let data = String::from(
+            "Ted:NNP now:RB likes:VBZ green:NN\nMary:NNP likes:VBZ red:NN\nMary:NNP now:RB loves:VBZ red:NN\nFred:NNP sees:VBZ Mary:NNP sometimes:RB"
+        );
+        let model = HiddenMarkov::new(2, data);
+        let mut constrained_model = ConstrainedHiddenMarkov::new(model.clone(), 4, Some(hidden_constraints), None);
+        constrained_model.train();
+
+        assert_eq!(1.0, constrained_model.hidden_probs[0][format!("{} {}", START_TOKEN, START_TOKEN).as_str()]["NNP VBZ"]);
+        assert_eq!(0.0, constrained_model.hidden_probs[0][format!("{} {}", START_TOKEN, START_TOKEN).as_str()]["NNP RB"]);
+        assert_eq!(0.0, constrained_model.hidden_probs[0]["NNP RB"]["VBZ NN"]);
+        assert_eq!(0.0, constrained_model.hidden_probs[0]["NNP VBZ"]["NNP RB"]);
+        assert_eq!(1.0, constrained_model.hidden_probs[1]["NNP RB"]["VBZ NN"]);
+        assert_eq!(1.0, constrained_model.hidden_probs[1]["NNP VBZ"]["NNP RB"]);
+
+        assert_ne!(0, constrained_model.sample_sequence(true).len());
     }
 }

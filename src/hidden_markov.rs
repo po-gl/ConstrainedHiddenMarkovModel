@@ -41,29 +41,47 @@ impl HiddenMarkov {
     }
 
     fn process_line(&mut self, line: &str) {
-        let mut tokens = line.split_whitespace();
-        match tokens.next() {
-            None => (),
-            Some(token) => {
-                let mut prev_token: &str = START_TOKEN;
-                let mut curr_token: &str = token;
-                self.increment(prev_token, curr_token);
+        let mut tokens = line.split_whitespace().peekable();
+        let mut token = vec![];
+        let mut curr_token = vec![];
+        let mut is_first_token = true;
+        let mut markov_count = 0;
+        while tokens.peek().is_some() {
+            token.push(tokens.next().unwrap());
+            markov_count += 1;
+            if markov_count >= self.markov_order {
+                let prev_token = if is_first_token { vec![START_TOKEN; self.markov_order as usize] } else { curr_token.to_owned() };
+                curr_token = token.clone();
 
-                for token in tokens {
-                    prev_token = curr_token;
-                    curr_token = token;
-                    self.increment(prev_token, curr_token);
-                }
+                self.increment(prev_token, curr_token.to_owned());
+
+                markov_count = 0;
+                token.clear();
+                is_first_token = false;
             }
         }
     }
 
-    fn increment(&mut self, token: &str, next_token: &str) {
-        let (_observed, hidden) = HiddenMarkov::split_token(token);
-        let (next_observed, next_hidden) = HiddenMarkov::split_token(next_token);
+    fn increment(&mut self, tokens: Vec<&str>, next_tokens: Vec<&str>) {
+        let mut full_hidden = "".to_owned();
+        let mut full_next_hidden = "".to_owned();
+        let mut full_next_observed = "".to_owned();
+        for (token, next_token) in tokens.iter().zip(next_tokens.iter()) {
+            let (_observed, hidden) = HiddenMarkov::split_token(token);
+            let (next_observed, next_hidden) = HiddenMarkov::split_token(next_token);
 
-        self.increment_hidden(hidden, next_hidden.to_owned());
-        self.increment_observed(next_hidden, next_observed);
+            full_hidden.push_str(hidden.as_str());
+            full_hidden.push(' ');
+            full_next_hidden.push_str(next_hidden.as_str());
+            full_next_hidden.push(' ');
+            full_next_observed.push_str(next_observed.as_str());
+            full_next_observed.push(' ');
+        }
+        full_hidden.pop(); // remove last space
+        full_next_hidden.pop();
+        full_next_observed.pop();
+        self.increment_hidden(full_hidden, full_next_hidden.to_owned());
+        self.increment_observed(full_next_hidden, full_next_observed);
     }
 
     fn increment_hidden(&mut self, hidden: String, next_hidden: String) {
@@ -98,14 +116,23 @@ impl HiddenMarkov {
             let sum: f64 = outer_map.values().sum();
             for (_, inner_map_val) in outer_map.iter_mut() {
                 *inner_map_val = *inner_map_val / sum;
+                // if *inner_map_val <= 0.00001 {
+                //     println!("normalize_nested_map: {:?}", inner_map_val);
+                // }
             }
         }
     }
 
     pub fn sample_sequence(&self, length: i32) -> String {
         let mut sequence = String::from("");
-        let mut curr_hidden = START_TOKEN;
-        for i in 0..length {
+        let mut start_string = "".to_owned();
+        for _ in 0..self.markov_order {
+            start_string.push_str(START_TOKEN);
+            start_string.push(' ');
+        }
+        start_string.pop();
+        let mut curr_hidden = start_string.as_str();
+        for i in 0..length/self.markov_order as i32 {
             if self.hidden_probs.contains_key(curr_hidden) {
                 curr_hidden = HiddenMarkov::next_token(&self.hidden_probs[curr_hidden])
             } else {
@@ -113,9 +140,11 @@ impl HiddenMarkov {
             }
 
             if self.observed_probs.contains_key(curr_hidden) {
-                sequence += HiddenMarkov::next_token(&self.observed_probs[curr_hidden]);
-                sequence += ":";
-                sequence += curr_hidden;
+                let observed = HiddenMarkov::next_token(&self.observed_probs[curr_hidden]);
+                for (observed, hidden) in observed.split_whitespace().zip(curr_hidden.split_whitespace()) {
+                    sequence += format!("{}:{} ", observed, hidden).as_str();
+                }
+                sequence.pop();
                 if i != length - 1 { sequence += " " }
             }
         }
@@ -294,10 +323,10 @@ mod tests {
             hidden_probs: Default::default(),
             observed_probs: Default::default()
         };
-        model.increment(START_TOKEN, START_TOKEN);
-        model.increment("loves:VBZ", "red:NN");
-        model.increment("loves:VBZ", "red:NN");
-        model.increment("sees:VBZ", "green:NN");
+        model.increment(vec![START_TOKEN], vec![START_TOKEN]);
+        model.increment(vec!["loves:VBZ"], vec!["red:NN"]);
+        model.increment(vec!["loves:VBZ"], vec!["red:NN"]);
+        model.increment(vec!["sees:VBZ"], vec!["green:NN"]);
 
         assert_eq!(2.0, model.observed_probs["NN"]["red"]);
         assert_eq!(3.0, model.hidden_probs["VBZ"]["NN"]);
@@ -343,5 +372,32 @@ mod tests {
         assert_eq!(0.6, model.hidden_probs["NNP"]["RB"]);
         assert_eq!(0.4, model.hidden_probs["NNP"]["VBZ"]);
         assert_eq!(1.0, model.observed_probs["VBZ"]["likes"]);
+    }
+
+    #[test]
+    fn higher_order_hidden_markov() {
+        let data = String::from(
+            "Ted:NNP now:RB likes:VBZ green:NN\nMary:NNP likes:VBZ red:NN\nMary:NNP now:RB loves:VBZ red:NN\nFred:NNP sees:VBZ Mary:NNP sometimes:RB"
+        );
+        let mut model = HiddenMarkov {
+            markov_order: 2,
+            hidden_probs: Default::default(),
+            observed_probs: Default::default()
+        };
+        model.train(data);
+
+        assert_eq!(0.5, model.hidden_probs[format!("{} {}", START_TOKEN, START_TOKEN).as_str()]["NNP VBZ"]);
+        assert_eq!(0.5, model.hidden_probs[format!("{} {}", START_TOKEN, START_TOKEN).as_str()]["NNP RB"]);
+        assert_eq!(1.0, model.hidden_probs["NNP RB"]["VBZ NN"]);
+        assert_eq!(1.0, model.hidden_probs["NNP VBZ"]["NNP RB"]);
+        assert_eq!(0.5, model.observed_probs["VBZ NN"]["loves red"]);
+        assert_eq!(0.5, model.observed_probs["VBZ NN"]["likes green"]);
+        assert_eq!(1.0/3.0, model.observed_probs["NNP RB"]["Mary sometimes"]);
+        assert_eq!(1.0/3.0, model.observed_probs["NNP RB"]["Ted now"]);
+        assert_eq!(1.0/3.0, model.observed_probs["NNP RB"]["Mary now"]);
+        assert_eq!(0.5, model.observed_probs["NNP VBZ"]["Mary likes"]);
+        assert_eq!(0.5, model.observed_probs["NNP VBZ"]["Fred sees"]);
+
+        assert_ne!(0, model.sample_sequence(4).len());
     }
 }
