@@ -1,0 +1,11 @@
+---
+training_file : "data/small_test.txt"
+markov_order : 1
+constraints : |
+  SW(t):NC
+  NC*2
+  red:NC
+# explanation:
+# SW(t):NC    StartsWith letter "t" constraint on observed state and NoConstraint on hidden state
+# NC*2        Shorthand for NoConstraint for multiple (2) sequence positions
+# red:NC      The default constraint is Matches; here, the observed state is constraint to match "red"
