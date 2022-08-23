@@ -8,6 +8,10 @@ by Pachet et al. in their paper, *"Finite-Length Markov Processes with Constrain
 The model generates sequences and can apply user-defined constraints to the sequences. 
 Sequences could be generated in any number of domains such as natural language or music generation.
 
+<img width="800" alt="trained model for toy example" src="https://user-images.githubusercontent.com/42399205/186280300-829557c8-fa82-48a8-8509-d9b772e412e4.png">
+
+Above is a visual representation of a trained constrained hidden Markov model.
+
 ## Usage
 Ensure that ```cargo``` is installed then run using the following command inside the project directory.
 ```
