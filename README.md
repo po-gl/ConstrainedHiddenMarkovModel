@@ -1,0 +1,32 @@
+# ConstrainedHiddenMarkovModel
+
+This novel model was implemented as part of my [Master's thesis](https://porterglines.com/assets/Glines_Porter_MS.pdf) to generate musical sequences
+styled after Bach chorales (also see https://github.com/po-gl/BachPipeline).
+The constrained hidden Markov processes is a novel extension of work done 
+by Pachet et al. in their paper, *"Finite-Length Markov Processes with Constraints"*.
+
+The model generates sequences and can apply user-defined constraints to the sequences. 
+Sequences could be generated in any number of domains such as natural language or music generation.
+
+## Usage
+Ensure that ```cargo``` is installed then run using the following command inside the project directory.
+```
+cargo run -- -n 10 -c config.yaml
+```
+
+Available options are listed below:
+
+```
+USAGE:
+    constrained_hmm [OPTIONS]
+
+OPTIONS:
+    -c, --config <config_file>     YAML config file path
+    -f, --file <training_file>     Training file path
+    -h, --help                     Print help information
+    -m, --order <markov_order>     Markov order
+    -n, --sequences <sequences>    The number of sequences to generate
+    -o, --out <output_file>        Output file to write sequences to
+```
+
+Constraints are specified by the YAML config file. See ```config.yaml``` for an example.
