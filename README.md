@@ -15,6 +15,7 @@ Above is a visual representation of a trained constrained hidden Markov model.
 ## Usage
 Ensure that ```cargo``` is installed then run using the following command inside the project directory.
 ```
+cargo build --release
 cargo run -- -n 10 -c config.yaml
 ```
 
